@@ -86,5 +86,13 @@
 - 分类：
   - global cache：所有的nodes使用一个cache space。但是当用户量激增的时候，cache会吃紧
   - distributed cache：使用hash function来分块
+- Strategies：
+  - Read
+    - Cache aside
+    - read through
+  - Write
+    - write around
+    - write back
+    - write through
 
 ## Proxies
