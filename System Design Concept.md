@@ -57,6 +57,12 @@
 
 ## Data Center
 
+- 大装置，处理商业运作的数据，由多个主机构成，需要空调冷却以及供电防火设备
+- 多个数据中心的现实挑战：
+  - traffic redirection: GeoDNS将traffic导入正确（距离客户地理位置最近）的数据中心
+  - 数据同步：将不同数据中心的数据进行复制，保持一致性
+  - 测试和部署：automated deployment tools are needed
+
 ## IP(Identity Provider)
 
 ## Message Queues
@@ -86,13 +92,80 @@
 - 分类：
   - global cache：所有的nodes使用一个cache space。但是当用户量激增的时候，cache会吃紧
   - distributed cache：使用hash function来分块
-- Strategies：
-  - Read
-    - Cache aside
-    - read through
-  - Write
-    - write around
-    - write back
-    - write through
 
 ## Proxies
+
+## API Gateway网关
+
+- 功能：
+  - 接入HTTP请求，检查黑白名单
+  - 限流，指标监控
+    - control the rate of traffic sent by a client or a service.限制一段时间内用户请求量。
+    - 过量的请求将被拒绝
+  - 确认IP的authentication和authorization
+  - API请求进入系统的唯一入口,封装了系统内部结构
+  - request information from services映射指定将请求路由到具体的服务
+  - 日志审查monitoring, logging, tracing
+  - combine responses组合改善用户体验
+- 常用网关：Ngnix，spring cloud gateway
+
+## 限流
+
+- 目的：防止特殊目的性爬虫、恶意刷单，增强系统对突发流量的应对 将其控制在合理范围内
+- 途径：拒绝服务（定向到错误页或告知资源没有了）、排队或等待、降级（返回兜底数据或默认数据）
+- 常见算法：
+  - Token bucket
+    - 参数
+      - bucket size：桶可以乘放的最大token数
+      - refill rate：每秒token被放入桶中的数量
+    - working process：
+      - 假设一个request对应1个单位的token，每接收一个token时check一下桶里目前的token量是否>bucket_size
+        - 如果还有空间，调用这些令牌，请求通过；
+        - 如果没有足够的空间，新的令牌被拒绝request is dropped；
+    - evaluation:
+      - 方便实施，节约内存，允许一定程度的突发传输
+      - 但是调节参数的时候比较难控制
+  - Leaking bucket漏斗
+    - 特征：request输出的速率是固定的a fixed rate，FIFO队列, request的输入没有限制，所以呈漏斗状
+    - working process：request来了check一下queue是不是full：not full-->将request加入到queue中；full-->drop this request新请求被拒绝, 队列中的请求按照一个fixed rate来处理
+    - 参数：
+      - bucket size：队列的size
+      - outflow rate：每秒处理多少个request
+    - 不会出现突发流量的状况
+  - Fixed window counter
+    - working process:
+      - 将时间轴分割成大小固定的时间窗，为每个窗设置一个计数器counter
+      - 每增加一个request的时候，counter的计数会add 1，同时记录请求时间
+      - 当某个窗口内的counter计数>预先设置好的threshold时，新的request将被拒绝，直到新的时间窗开启。
+    - evaluation：
+      - 当请求量很大的情况下，在时间窗口的开头quota就被快速消耗完，剩下的时间不处理任何请求，不合理
+      - 并不能准确地将处理的request数限制在counter预先规定的threshold以内，对边界没有很好的处理
+      - 实现简单
+  - Sliding window log滑动日志
+    - working process:
+      - 通过缓存记录request的时间戳
+      - 当新的request出现时，remove掉outdated时间戳
+        - outdated timestamp: 比当前的时间窗口起点更早的
+      - 将新的时间戳记录在日志中
+      - 当log size的大小< allowed count-->request accepted
+    - 我们可以选择linux或者human-readable representation的时间戳
+    - 参数：
+      - 每秒允许处理的request数（速率）
+    - 评价：限流准确，但是很耗内存enough if the request is denied,它依然被储存在cache中
+  - Sliding window counter
+    - fixed window counter+sliding window log
+    - 通过使用滑动窗口实现对cache需求量的减少
+    - 将滑动时间窗再切分
+
+## CAP理论
+
+- 分布式系统中consistency，availability，partition tolerance的权衡
+  - C:所有节点的数据一致，任何时刻和节点访问到的数据都是最新的
+  - A：任何时刻都能访问到系统
+  - P：即使网络分区出现故障(slow network connection, unavailable connection等问题)，系统仍然可以正常运行
+- 不可能全部实现3个诉求，最多只能同时实现2个
+- 现实中一般P是大部分系统要具备的功能，一般需要在C和A之间取舍
+
+## URL输入浏览器后会发生什么？
+
+- Component：`Scheme://Domain/Path/Resource`
