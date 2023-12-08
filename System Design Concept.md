@@ -3,7 +3,7 @@
 ## HTTPS
 
 - HTTP 的加密版本，如果 data 在半路被拦截，被拦截的 data 呈二进制代码状。
-  - TCP 挥手，建立 TCP 链接
+  - TCP 握手，建立 TCP 链接
   - 客户将加密的 TCP 信息发送到服务器
   - 服务器将回复加上 SSL 认证（包含：公钥，host name，expiry date 等信息）
   - 客户将被 public key 加密过的 session 钥匙发送到服务器
@@ -21,6 +21,9 @@
 - 如果想在未过expire time之前，删掉CDN里的文件内容的方法：
   - 使用CDN vendor提供的API
   - 设置object的版本的参数，做版本管理
+- Push CDN & Pull CDN（主动方不同）
+  - 推送式：源服务器将数据推送到CDN
+  - 拉取：CDN在用户首次请求时，从源服务器获取数据并缓存
 
 ## DNS(Domain Name System)
 
@@ -54,6 +57,8 @@
   - 最小宽带优先
   - 最小连接数优先
   - 最小响应时间优先
+- layer4 & layer7
+- Active-active & Active-passive
 
 ## Data Center
 
@@ -92,8 +97,16 @@
 - 分类：
   - global cache：所有的nodes使用一个cache space。但是当用户量激增的时候，cache会吃紧
   - distributed cache：使用hash function来分块
+- 性能指标：
+  - 命中率hit rate: 依赖缓存提供数据而非访问原始来源
+  - 未命中率miss rate：1-hit rate
+  - 缓存大小cache size：缓存分配的内存，较大的缓存会导致更大的命中率，但是增加了内存负担
+  - 延迟latency：从缓存中访问数据需要的时间
 
 ## Proxies
+
+- Forward Proxies
+- Reverse Proxies
 
 ## API Gateway网关
 
@@ -169,3 +182,86 @@
 ## URL输入浏览器后会发生什么？
 
 - Component：`Scheme://Domain/Path/Resource`
+  - scheme：向web server发送连接利用https
+  - domain：网站的域名
+  - path：从服务器到requested资源的路径
+  - resource：想要访问的资源的名称
+- process:
+  - 在浏览器中输入URL
+  - 浏览器在DNS cache中找是否有对应的IP
+    - 数据储存在不同位置的layer中：browser/OS/OS/local network/ISP cache
+    - 如果并不能找到：通过DNS resolver递归式寻找DNS服务器，直到IP地址被查找到
+  - 浏览器与服务器建立TCP连接
+  - 浏览器向服务器发送HTTP协议(`GET`)
+  - 服务器处理request并将HTTP response送返浏览器
+  - 浏览器呈递HTTP内容
+
+### URL Shortener Design
+
+## Horizontal Scaling VS Vertical Scaling
+
+- Vertical Scaling:
+  - definition：给一台服务器增加增多的硬件设备RAM、CPU
+  - evaluation：比较直接简单,更适合traffic不是很密集的时候；但是不能无限的加硬件设施，并且没有故障转移和备援设备，如果一个设备故障了 整个app、系统都die掉了
+- Horizontal Scaling
+  - definition：给一个单位的设备组增加更多的服务器，每个server副本处理一部分请求
+  - evaluation：具有无限拓展性，减轻单点故障
+
+## Consistent Hashing
+
+- 目的：为了成功achieve horizontal scaling，对请求和数据进行准确地distribute
+- 传统哈希方法：
+  - 哈希函数：$serverIndex=hash(key)\%N$
+    - N: 服务器数量
+    - 一次来将keys分布在不同的server上
+    - 这个方法适用于the number of servers is fixed，数据可以均匀分配在不同的服务器时
+  - 问题：并不能在有新server加入 或 现存server被删除时依旧有效，会造成大量数据迁移，导致通信压力增大，uneven imbalanced load
+- 一致性哈希
+  - 优点：当server的数量动态变化时，减少数据的迁移量，满足了单调性、负载均衡、分散性
+  - concepts：
+    - hash空间首尾相连-->hash ring
+    - hash server:使用hash function根据IP或者名字将servers映射在哈希环形上
+    - hash keys:将数据通过hash算法得到的对应key值映射到hash ring中
+    - key按照**顺时针**方向找到对应的第一个临近的server并进行存储
+    - add/remove a server:只有一小部分的key需要redistribute到新的server中，而不需要近乎全局迁移
+  - 存在的问题：
+    - 当hash ring中存在的机器较少时，会出现size of partitions分布不均匀,造成哈希环倾斜，平衡性弱
+  - 解决途径：**虚拟节点**(virtual nodes OR replicas)
+    - intuition:让节点尽可能的多，使各个server均匀的分布在hash ring中。参照物理节点通过虚拟的方式复制多个，一个机器对应多个virtual nodes
+      - eg: $S0_0, S0_1, S0_2$-->都是server0的虚拟节点
+    - 这样按照顺时针顺序，找到第一个临近虚拟节点，将key储存在该虚拟节点的对应server节点上
+    - 更多的虚拟节点created，更好的balance性，因为data distribution的标准差减少了, representing how data are spread out.但是这需要更多的储存空间在容纳更多的虚拟节点
+
+
+## TCP(Transmission Control Protocol)传输通信协议
+
+- 最大TCP连接数=numbers of client IPs * 客户端端口数
+- 三次握手：确认双方的通信能力和意愿
+  - process：
+    - 客户端向服务器发送SYN**同步**包，请求建立连接
+    - 服务器向客户端发送SYN/ACK**同步/确认**包，确认服务器已经准备好建立连接
+    - 客户端向服务器发送ACK确认包，表示客户端也准备好建立连接
+  - 标识：
+    - FIN:终止连接
+    - RST：在发生无法恢复的错误时重置连接
+    - SYN：序列号必须要重置
+    - ISN：初始序列号
+  - 该过程中，client状态变化`CLOSE`-->`SYN_SENT`-->`ESTABLISHED`; server状态变化`CLOSE`-->`LISTEN`-->`SYN_RCVD`-->`ESTABLISHED`
+    - linux查看TCP状态：`netstat -napt`
+  - 前两次握手不可以携带数据，第三次握手可以携带应用层的数据
+  - 三次握手中<u>连接</u>是指什么？
+    - Socket(IP地址和端口号)，序列号(用来解决乱序问题)，窗口大小(解决流量控制问题)等新的组合
+  - 为什么要进行3次呢？
+    - 防止重复历史连接的初始化
+      - 如果是两次握手，无法阻止旧的连接
+    - 同步双方的序列号
+    - 避免资源浪费
+- 四次挥手：断开连接并防止数据流失
+  - process：
+    - 四次挥手的初始状态both client&server都为`ESTABLISHED`
+    - client给server发送FIN字段来启动终止进程，客户端进入`FIN_WAIT_1`阶段
+    - 服务器向client回复ACK来确认是否结束🔚。客户端进入`FIN_WAIT_2`阶段
+    - 服务器完成处理后，向客户端发送FIN字段，进入`LAST_ACK`状态
+    - 客户端接收到后，向服务器回复ACK确认字段并进入`TIME_AWAIT`状态。服务器收到后，进入`CLOSED`状态。
+    - 等待2MSL最大报文生存时间后，客户端也进入`CLOSED`状态。
+  - 四次挥手为什么client向server发送ACK和FIN不能和在一起呢？
