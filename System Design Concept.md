@@ -196,7 +196,7 @@
   - 服务器处理request并将HTTP response送返浏览器
   - 浏览器呈递HTTP内容
 
-### URL Shortener Design
+### (Tiny)URL Shortener Design
 
 ## Horizontal Scaling VS Vertical Scaling
 
@@ -265,3 +265,190 @@
     - 客户端接收到后，向服务器回复ACK确认字段并进入`TIME_AWAIT`状态。服务器收到后，进入`CLOSED`状态。
     - 等待2MSL最大报文生存时间后，客户端也进入`CLOSED`状态。
   - 四次挥手为什么client向server发送ACK和FIN不能和在一起呢？
+
+## UDP
+
+## Threads & Process
+
+- **Thread**
+  - definition：
+    - 可以看做在执行一个任务
+    - 所有线程共享一个相同的内存空间
+    - 每个线程都有自己的指令指针、堆栈、程序计数器和局部变量
+    - 是操作系统进行运算调度的最小单位
+    - 多线程可以实现并发执行
+  - components：
+    - Thread ID:用来区分不同的线程
+    - State:可以有创建`NEW`、就绪`READY`、运行`RUNNABLE`、阻塞`BLOCKED`、等待`WAITING`、死亡`TERMINATED`等状态
+    - Program Counter:代表当前指令位置
+    - Stack: 存储局部变量、函数调用的返回地址，大小固定
+    - Register Set:存储临时变量、函数参数、返回值
+- **Process**
+  - Definition：
+    - 正在执行的程序/应用，一个进程可以由>=0个线程组成，每个线程在进行不同的任务
+    - 每个进程都有自己的地址和系统资源，是资源分配的基本单位
+    - 创建和终止需要消耗很长的时间
+  - Components:
+    - PID、进程空间、State(运行、等待、睡眠)、优先级(用于竞争CPU、GPU资源时的排序)、进程间通信IPC(管道、信号、共享映射区、本地套接字)、进程安全(权限、资源访问)
+- 死锁问题：
+  - 多个线程之间的互相等待对方释放资源可能导致死锁，所有的线程都无法继续执行下去
+  - solution：
+    - 资源一次性分配、资源有序分配、只要有一个资源得不到分配，就不给改进程分配其他的资源
+    - coding: mpi4py,需要注意的是send和receive的编写顺序
+
+    ```python
+    ## Method1
+    from mpi4py import MPI
+    comm=MPI.COMM_WORLD #set the communicator
+    rank = comm.rank #用于区别不用的进程process
+    print("my rank is : " , rank)
+
+    if rank==1:
+        data_send= "a"
+        destination_process = 5
+        source_process = 5
+        comm.send(data_send,dest=destination_process)
+        data_received=comm.recv(source=source_process)
+        # print("sending data %s " %data_send + "to process %d" %destination_process)
+        # print("data received is = %s" %data_received)
+
+    if rank==5:
+        data_send= "b"
+        destination_process = 1
+        source_process = 1
+        comm.send(data_send,dest=destination_process)
+        data_received=comm.recv(source=source_process)
+        # print("sending data %s :" %data_send + "to process %d" %destination_process)
+        # print("data received is = %s" %data_received)
+    ```
+
+    ```python
+    #Method2:直接使用sendrecv函数，去掉comm.send并将上面data_received定义改为：
+    data_received=comm.sendrecv(data_send,dest=destination_process,source =source_process)
+    ```
+
+- 进程池和线程池：
+  - 目的：简化process/thread的使用，减少创建的开销，让它们在生命周期内多次使用
+  - 组成：
+    - task queue要执行的任务
+    - 一系列进程/线程：用来执行这些queue中的任务
+  - python:
+  
+    ```python
+    import concurrent.futures
+    #常用语句建立线程/进程池：
+    concurrent.futures.ThreadPoolExecutor(max_workers=5)
+    concurrent.futures.ProcessPoolExecutor(max_workers=5)
+    ```
+
+    ```python
+    import multiprocessing
+    from multiprocessing import Pool
+    ...
+    p = Pool(processes=n)
+    ...
+    #重点函数: p.apply(需要运算的func)直到得到结果之前一直阻塞,p.close()关闭进程池,p.join()等待所有工作进程退出
+    ```
+
+## Database Selection
+
+## 唯一ID生成器
+
+- Scene: 支付流水单号，优惠券编号，账号
+- 要求：64bits，全局唯一，几乎按照时间排序，尽量为numerical，低延迟
+- multi-master replication
+  - use MySQL auto_increment feature自增模式、Oracle使用sequence模式,每次号码增加k(k:数据库中server的数量)
+  - 评价：
+    - 当有多个数据中心 或者 当server数量有增加或减少 或者 多个server的时候，数据consistency难以保证，数据库可能会出现重复发号；
+    - 对数据库的依赖性强，高并发时单点MySQL容易出现性能瓶颈
+
+```sql
+CREATE TABLE example_table (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    data VARCHAR(255)
+);
+```
+
+- UUID唯一识别码
+  - feature：16进制，36个字符，由数字和小写英文字母组成，8-4-4-4-12
+  - 评价：
+    - 不需要考虑多个服务器之间的coordination的问题，容易生成，碰撞风险低，本机生成
+    - 但是长度太长，不是数字的形式，无序字符串
+
+```java
+import java.util.UUID;
+
+public class UUIDExample {
+    public static void main(String[] args) {
+        UUID uuid = UUID.randomUUID();
+        System.out.println("Generated UUID: " + uuid.toString());
+    }
+}
+```
+
+- ticket server
+  - 依赖于Flicker生成分布式primary keys全局主键
+    - 为避免单点故障，运行至少2台数据库实例
+  - 利用SQL数据库`auto_increment`和`replace into`
+    - `replace into`:将数据插入到table里，check table中是否已经有此行数据-->如果有，删除以储存的数据，然后插入新数据；如果没有，直接插入新数据。
+  - 评价：易出现单点故障；numeric ID，生成的ID有序，操作简单，适合于中小型应用系统
+
+```sql
+CREATE TABLE `Tickets64` (
+  `id` bigint(20) unsigned NOT NULL auto_increment,
+  `stub` char(1) NOT NULL default '',
+  PRIMARY KEY  (`id`),
+  UNIQUE KEY `stub` (`stub`)
+) ENGINE=MyISAM
+```
+
+```sql
+-- 产生新的全局64 bits的ID:
+REPLACE INTO Tickets64 (stub) VALUES ('a');
+SELECT LAST_INSERT_ID();
+-- stub设置为唯一索引
+```
+
+```shell
+TicketServer1:
+auto-increment-increment = 2
+auto-increment-offset = 1
+ 
+TicketServer2:
+auto-increment-increment = 2
+auto-increment-offset = 2
+#通过初始值和步长生成奇偶ID
+```
+
+- SnowFlake
+  - divide and conquer,将要生成的ID对象拆分成很多小部分
+  - sections and explanation:
+    - sign bit:1,不用且永远为0
+    - timestamp：41位，共可以使用69年
+      - binary0/1-->decimal-->UTC
+    - data center id:5
+    - machine id:5，共可以表示1024台机器
+    - sequence number:12, 同一毫秒内生成的序列号,incremented by 1,下一毫秒重设为0
+      - 最大可达到每毫秒4096个序列号generated
+  - 评价：
+    - 高并发下生成的ID不重复，基本有序递增；
+    - 但是如果主机回拨，有可能造成重复ID；
+    - 每一台机器的系统时间可能不完全同步;
+    - 工作机器的ID可能出现重复
+  - 🌟案例：
+    - 美团Leaf <https://tech.meituan.com/2019/03/07/open-source-project-leaf.html>
+    - 百度 <https://github.com/baidu/uid-generator>
+  - codes实现: <https://github.com/beyondfengyu/SnowFlake/blob/master/SnowFlake.java>
+- Redis
+- facts：国内大厂一般使用SnowFlake和SQL-Segment结合的方法
+
+## Heatbeat熔断机制
+
+- Definition：
+  - 规定时间内，流量超过熔断机制的maximum或失败事件总数达到threshold，会自动断开。牺牲局部，保全真题
+  - 用于防止服务器雪崩(即某个基础服务不可用，导致整个系统崩溃)
+  - States：
+    - Closed:所有请求都正常访问
+    - Open:所有请求都会被降级
+    - Half Open:进入5s休眠时间，之后释放部分请求通过，如果这些请求是健康的，则将状态调至为Closed，否则会变为Open
+- 实现: Hystrix
